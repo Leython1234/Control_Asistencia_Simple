@@ -12,6 +12,91 @@ $editar = false;
 $registroEditar = null;
 
 /* ==============================
+   FUNCION PARA CALCULAR HORAS
+   ============================== */
+
+function calcularHorasExtras($Fecha, $HoraEntrada, $HoraSalida, $horaEntradaNormal, $horaSalidaNormal)
+{
+    if ($HoraSalida == "") {
+        return "00:00:00";
+    }
+
+    $diaSemana = date("N", strtotime($Fecha));
+
+    $horaReal = explode(":", $HoraSalida);
+
+    $minutosReal =
+        ($horaReal[0] * 60) +
+        $horaReal[1];
+
+    /*
+       LUNES A VIERNES
+       Las horas extras comienzan después de las 18:20.
+    */
+
+    if ($diaSemana >= 1 && $diaSemana <= 5) {
+
+        $horaBase = explode(":", $horaSalidaNormal);
+
+        $minutosBase =
+            ($horaBase[0] * 60) +
+            $horaBase[1];
+
+        if ($minutosReal <= $minutosBase) {
+            return "00:00:00";
+        }
+
+        $diferencia =
+            $minutosReal - $minutosBase;
+    }
+
+    /*
+       SABADO
+       Todo el tiempo trabajado es hora extra.
+       Se toma como inicio las 08:00.
+    */
+
+    elseif ($diaSemana == 6) {
+
+        if ($HoraEntrada == "") {
+            $HoraEntrada = $horaEntradaNormal;
+        }
+
+        $horaInicio = explode(":", $HoraEntrada);
+
+        $minutosInicio =
+            ($horaInicio[0] * 60) +
+            $horaInicio[1];
+
+        if ($minutosReal <= $minutosInicio) {
+            return "00:00:00";
+        }
+
+        $diferencia =
+            $minutosReal - $minutosInicio;
+    }
+
+    /*
+       DOMINGO
+       Por ahora no se consideran horas extras.
+    */
+
+    else {
+
+        return "00:00:00";
+    }
+
+    $horas = floor($diferencia / 60);
+    $minutos = $diferencia % 60;
+
+    return sprintf(
+        "%02d:%02d:00",
+        $horas,
+        $minutos
+    );
+}
+
+/* ==============================
    GUARDAR / EDITAR ASISTENCIA
    ============================== */
 
@@ -63,40 +148,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
             /* Calcular horas extras automáticamente */
 
-            $HorasExtras = "00:00:00";
-
-            if ($Estado == "PRESENTE" && $HoraSalida != "") {
-
-                $horaBase = explode(":", $horaSalidaNormal);
-                $horaReal = explode(":", $HoraSalida);
-
-                $minutosBase =
-                    ($horaBase[0] * 60) +
-                    $horaBase[1];
-
-                $minutosReal =
-                    ($horaReal[0] * 60) +
-                    $horaReal[1];
-
-                if ($minutosReal > $minutosBase) {
-
-                    $diferencia =
-                        $minutosReal - $minutosBase;
-
-                    $horas = floor($diferencia / 60);
-                    $minutos = $diferencia % 60;
-
-                    $HorasExtras = sprintf(
-                        "%02d:%02d:00",
-                        $horas,
-                        $minutos
-                    );
-                }
-            }
+            $HorasExtras = calcularHorasExtras(
+                $Fecha,
+                $HoraEntrada,
+                $HoraSalida,
+                $horaEntradaNormal,
+                $horaSalidaNormal
+            );
 
             /* Si es falta, no debe tener horas */
 
             if ($Estado == "FALTA") {
+
                 $HoraEntrada = "";
                 $HoraSalida = "";
                 $Tardanza = "00:00:00";
@@ -185,50 +248,74 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         } else {
 
-            $CodHorario = 1;
-            $HoraEntrada = "08:00:00";
-            $HoraSalida = "18:20:00";
-            $Tardanza = "00:00:00";
-            $HorasExtras = "00:00:00";
-            $Estado = "PRESENTE";
-            $Observacion = "";
+            /*
+               La asistencia normal corresponde
+               a lunes a viernes.
 
-            $insertar = $conexion->prepare("
-                INSERT INTO tb_asistencia
-                (
-                    CodEmpleado,
-                    CodHorario,
-                    Fecha,
-                    HoraEntrada,
-                    HoraSalida,
-                    Tardanza,
-                    HorasExtras,
-                    Estado,
-                    Observacion
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ");
+               Para sábado se debe utilizar
+               el registro de horas extras.
+            */
 
-            $insertar->bind_param(
-                "sisssssss",
-                $CodEmpleado,
-                $CodHorario,
-                $Fecha,
-                $HoraEntrada,
-                $HoraSalida,
-                $Tardanza,
-                $HorasExtras,
-                $Estado,
-                $Observacion
-            );
+            $diaSemana = date("N", strtotime($Fecha));
 
-            if ($insertar->execute()) {
+            if ($diaSemana == 6) {
 
-                $mensaje = "Asistencia normal registrada correctamente.";
+                $error =
+                    "El sábado no tiene jornada normal. " .
+                    "Debe registrar la salida mediante HORAS EXTRAS.";
+
+            } elseif ($diaSemana == 7) {
+
+                $error =
+                    "El domingo no está habilitado para registrar asistencia normal.";
 
             } else {
 
-                $error = "No se pudo registrar la asistencia.";
+                $CodHorario = 1;
+                $HoraEntrada = "08:00:00";
+                $HoraSalida = "18:20:00";
+                $Tardanza = "00:00:00";
+                $HorasExtras = "00:00:00";
+                $Estado = "PRESENTE";
+                $Observacion = "";
+
+                $insertar = $conexion->prepare("
+                    INSERT INTO tb_asistencia
+                    (
+                        CodEmpleado,
+                        CodHorario,
+                        Fecha,
+                        HoraEntrada,
+                        HoraSalida,
+                        Tardanza,
+                        HorasExtras,
+                        Estado,
+                        Observacion
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ");
+
+                $insertar->bind_param(
+                    "sisssssss",
+                    $CodEmpleado,
+                    $CodHorario,
+                    $Fecha,
+                    $HoraEntrada,
+                    $HoraSalida,
+                    $Tardanza,
+                    $HorasExtras,
+                    $Estado,
+                    $Observacion
+                );
+
+                if ($insertar->execute()) {
+
+                    $mensaje = "Asistencia normal registrada correctamente.";
+
+                } else {
+
+                    $error = "No se pudo registrar la asistencia.";
+                }
             }
         }
     }
@@ -243,8 +330,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $Fecha = $_POST["Fecha"];
         $HoraSalidaExtra = $_POST["HoraSalidaExtra"];
 
+        $diaSemana = date("N", strtotime($Fecha));
+
         $consulta = $conexion->prepare("
-            SELECT CodAsistencia, Estado
+            SELECT CodAsistencia, Estado, HoraEntrada
             FROM tb_asistencia
             WHERE CodEmpleado = ? AND Fecha = ?
         ");
@@ -263,9 +352,37 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
             $error = "Debe ingresar la hora real de salida.";
 
-        } elseif ($HoraSalidaExtra <= $horaSalidaNormal) {
+        } elseif ($diaSemana == 7) {
 
-            $error = "La hora de salida debe ser mayor a las 18:20.";
+            $error =
+                "El domingo no está habilitado para registrar horas extras.";
+
+        } elseif (
+            $diaSemana >= 1 &&
+            $diaSemana <= 5 &&
+            $HoraSalidaExtra <= $horaSalidaNormal
+        ) {
+
+            /*
+               LUNES A VIERNES
+               La salida debe ser después de 18:20.
+            */
+
+            $error =
+                "De lunes a viernes, la hora de salida debe ser mayor a las 18:20.";
+
+        } elseif (
+            $diaSemana == 6 &&
+            $HoraSalidaExtra <= $horaEntradaNormal
+        ) {
+
+            /*
+               SABADO
+               La salida debe ser después de la entrada.
+            */
+
+            $error =
+                "El sábado, la hora de salida debe ser mayor a las 08:00.";
 
         } elseif ($resultado->num_rows > 0) {
 
@@ -273,36 +390,37 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
             if ($asistencia["Estado"] == "PERMISO") {
 
-                $error = "Este trabajador tiene un permiso registrado para esa fecha.";
+                $error =
+                    "Este trabajador tiene un permiso registrado para esa fecha.";
 
             } else {
 
-                $CodAsistencia = $asistencia["CodAsistencia"];
+                $CodAsistencia =
+                    $asistencia["CodAsistencia"];
 
-                $horaBase = explode(":", $horaSalidaNormal);
-                $horaReal = explode(":", $HoraSalidaExtra);
+                /*
+                   Si es sábado, utilizamos la entrada
+                   registrada. Si no existe, usamos 08:00.
+                */
 
-                $minutosBase =
-                    ($horaBase[0] * 60) +
-                    $horaBase[1];
+                $HoraEntrada = $asistencia["HoraEntrada"];
 
-                $minutosReal =
-                    ($horaReal[0] * 60) +
-                    $horaReal[1];
+                if ($HoraEntrada == "" || $HoraEntrada == null) {
 
-                $diferencia =
-                    $minutosReal - $minutosBase;
+                    $HoraEntrada =
+                        $horaEntradaNormal . ":00";
+                }
 
-                $horas = floor($diferencia / 60);
-                $minutos = $diferencia % 60;
-
-                $HorasExtras = sprintf(
-                    "%02d:%02d:00",
-                    $horas,
-                    $minutos
+                $HorasExtras = calcularHorasExtras(
+                    $Fecha,
+                    $HoraEntrada,
+                    $HoraSalidaExtra,
+                    $horaEntradaNormal,
+                    $horaSalidaNormal
                 );
 
-                $HoraSalida = $HoraSalidaExtra . ":00";
+                $HoraSalida =
+                    $HoraSalidaExtra . ":00";
 
                 $actualizar = $conexion->prepare("
                     UPDATE tb_asistencia
@@ -334,6 +452,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         } else {
 
+            /*
+               NO EXISTE ASISTENCIA.
+
+               Para lunes a viernes:
+               Entrada = 08:00
+               Extras = salida - 18:20
+
+               Para sábado:
+               Entrada = 08:00
+               Extras = salida - 08:00
+            */
+
             $CodHorario = 1;
             $HoraEntrada = "08:00:00";
             $HoraSalida = $HoraSalidaExtra . ":00";
@@ -341,27 +471,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $Estado = "PRESENTE";
             $Observacion = "";
 
-            $horaBase = explode(":", $horaSalidaNormal);
-            $horaReal = explode(":", $HoraSalidaExtra);
-
-            $minutosBase =
-                ($horaBase[0] * 60) +
-                $horaBase[1];
-
-            $minutosReal =
-                ($horaReal[0] * 60) +
-                $horaReal[1];
-
-            $diferencia =
-                $minutosReal - $minutosBase;
-
-            $horas = floor($diferencia / 60);
-            $minutos = $diferencia % 60;
-
-            $HorasExtras = sprintf(
-                "%02d:%02d:00",
-                $horas,
-                $minutos
+            $HorasExtras = calcularHorasExtras(
+                $Fecha,
+                $HoraEntrada,
+                $HoraSalidaExtra,
+                $horaEntradaNormal,
+                $horaSalidaNormal
             );
 
             $insertar = $conexion->prepare("
@@ -723,6 +838,16 @@ table tr:hover {
     color: #374151;
 }
 
+.aviso-sabado {
+    background: #f8fafc;
+    border: 1px solid #d1d5db;
+    padding: 12px;
+    margin-top: 15px;
+    border-radius: 5px;
+    color: #374151;
+    font-size: 13px;
+}
+
 @media (max-width: 700px) {
 
     .contenedor-principal {
@@ -782,10 +907,6 @@ table tr:hover {
 
             <?php if ($editar && $registroEditar): ?>
 
-                <!-- ==============================
-                     FORMULARIO DE EDICIÓN
-                     ============================== -->
-
                 <div class="panel">
 
                     <h2 class="titulo-panel">
@@ -798,7 +919,7 @@ table tr:hover {
                         N.° <?php echo $registroEditar["CodAsistencia"]; ?>.
 
                         Las horas extras se calcularán automáticamente
-                        según la hora de salida.
+                        según el día y la hora de salida.
 
                     </div>
 
@@ -849,8 +970,10 @@ table tr:hover {
                                         <option
                                             value="<?php echo $empleado["CodEmpleado"]; ?>"
                                             <?php
-                                            if ($empleado["CodEmpleado"] ==
-                                                $registroEditar["CodEmpleado"]) {
+                                            if (
+                                                $empleado["CodEmpleado"] ==
+                                                $registroEditar["CodEmpleado"]
+                                            ) {
                                                 echo "selected";
                                             }
                                             ?>
@@ -870,7 +993,6 @@ table tr:hover {
 
                             </div>
 
-
                             <div class="campo">
 
                                 <label>Fecha</label>
@@ -886,7 +1008,6 @@ table tr:hover {
 
                         </div>
 
-
                         <div class="fila">
 
                             <div class="campo">
@@ -896,11 +1017,10 @@ table tr:hover {
                                 <input
                                     type="time"
                                     name="HoraEntrada"
-                                    value="<?php echo substr($registroEditar["HoraEntrada"], 0, 5); ?>"
+                                    value="<?php echo $registroEditar["HoraEntrada"] ? substr($registroEditar["HoraEntrada"], 0, 5) : ""; ?>"
                                 >
 
                             </div>
-
 
                             <div class="campo">
 
@@ -909,13 +1029,12 @@ table tr:hover {
                                 <input
                                     type="time"
                                     name="HoraSalida"
-                                    value="<?php echo substr($registroEditar["HoraSalida"], 0, 5); ?>"
+                                    value="<?php echo $registroEditar["HoraSalida"] ? substr($registroEditar["HoraSalida"], 0, 5) : ""; ?>"
                                 >
 
                             </div>
 
                         </div>
-
 
                         <div class="fila">
 
@@ -967,7 +1086,6 @@ table tr:hover {
 
                             </div>
 
-
                             <div class="campo">
 
                                 <label>Tardanza</label>
@@ -983,8 +1101,10 @@ table tr:hover {
 
                         </div>
 
-
-                        <div class="campo" style="margin-bottom:20px;">
+                        <div
+                            class="campo"
+                            style="margin-bottom:20px;"
+                        >
 
                             <label>Observación</label>
 
@@ -997,7 +1117,6 @@ table tr:hover {
                             >
 
                         </div>
-
 
                         <div class="botones">
 
@@ -1025,10 +1144,6 @@ table tr:hover {
 
 
             <?php if (!$editar): ?>
-
-                <!-- ==============================
-                     REGISTRAR ASISTENCIA
-                     ============================== -->
 
                 <div class="panel">
 
@@ -1086,7 +1201,6 @@ table tr:hover {
 
                             </div>
 
-
                             <div class="campo">
 
                                 <label>Fecha</label>
@@ -1102,23 +1216,31 @@ table tr:hover {
 
                         </div>
 
-
                         <div class="horario">
 
                             <strong>Horario establecido</strong>
 
                             <br><br>
 
-                            Entrada:
-                            <strong>08:00</strong>
+                            <span id="textoHorario">
+                                Lunes a viernes:
+                                Entrada <strong>08:00</strong>
+                                &nbsp;&nbsp;&nbsp;
+                                Salida <strong>18:20</strong>
+                            </span>
 
-                            &nbsp;&nbsp;&nbsp;
-
-                            Salida:
-                            <strong>18:20</strong>
+                            <div
+                                id="avisoSabado"
+                                class="aviso-sabado"
+                                style="display:none;"
+                            >
+                                <strong>Sábado:</strong>
+                                no existe jornada normal.
+                                Todo el tiempo trabajado se considera
+                                hora extra desde la hora de entrada.
+                            </div>
 
                         </div>
-
 
                         <div class="botones">
 
@@ -1141,7 +1263,6 @@ table tr:hover {
 
                         </div>
 
-
                         <div
                             class="extra"
                             id="panelExtras"
@@ -1156,6 +1277,7 @@ table tr:hover {
                                 <input
                                     type="time"
                                     name="HoraSalidaExtra"
+                                    id="HoraSalidaExtra"
                                     min="18:21"
                                 >
 
@@ -1172,6 +1294,14 @@ table tr:hover {
                                 REGISTRAR SALIDA CON HORAS EXTRAS
                             </button>
 
+                            <div
+                                id="textoExtra"
+                                class="aviso-sabado"
+                            >
+                                De lunes a viernes, las horas extras
+                                empiezan después de las 18:20.
+                            </div>
+
                         </div>
 
                     </form>
@@ -1180,10 +1310,6 @@ table tr:hover {
 
             <?php endif; ?>
 
-
-            <!-- ==============================
-                 LISTADO DE ASISTENCIAS
-                 ============================== -->
 
             <div class="panel">
 
@@ -1344,7 +1470,6 @@ table tr:hover {
                                     style="text-align:center;"
                                 >
                                     No existen asistencias registradas.
-
                                 </td>
 
                             </tr>
@@ -1382,6 +1507,8 @@ function mostrarExtras() {
         panel.style.display = "block";
 
     }
+
+    actualizarReglasFecha();
 }
 
 
@@ -1409,6 +1536,93 @@ function controlarEstado() {
 
     }
 
+}
+
+
+function actualizarReglasFecha() {
+
+    const fecha =
+        document.querySelector('input[name="Fecha"]');
+
+    const salida =
+        document.getElementById("HoraSalidaExtra");
+
+    const avisoSabado =
+        document.getElementById("avisoSabado");
+
+    const textoExtra =
+        document.getElementById("textoExtra");
+
+    if (!fecha) {
+        return;
+    }
+
+    if (fecha.value == "") {
+        return;
+    }
+
+    const fechaSeleccionada =
+        new Date(fecha.value + "T00:00:00");
+
+    const diaSemana =
+        fechaSeleccionada.getDay();
+
+    /*
+       JavaScript:
+       0 = Domingo
+       1 = Lunes
+       ...
+       6 = Sábado
+    */
+
+    if (diaSemana === 6) {
+
+        if (salida) {
+            salida.min = "08:01";
+        }
+
+        if (avisoSabado) {
+            avisoSabado.style.display = "block";
+        }
+
+        if (textoExtra) {
+            textoExtra.innerHTML =
+                "<strong>Sábado:</strong> todo el tiempo trabajado " +
+                "se considera hora extra desde la hora de entrada.";
+        }
+
+    } else {
+
+        if (salida) {
+            salida.min = "18:21";
+        }
+
+        if (avisoSabado) {
+            avisoSabado.style.display = "none";
+        }
+
+        if (textoExtra) {
+            textoExtra.innerHTML =
+                "De lunes a viernes, las horas extras " +
+                "empiezan después de las 18:20.";
+        }
+    }
+}
+
+
+/* Detectar cambio de fecha */
+
+const campoFecha =
+    document.querySelector('input[name="Fecha"]');
+
+if (campoFecha) {
+
+    campoFecha.addEventListener(
+        "change",
+        actualizarReglasFecha
+    );
+
+    actualizarReglasFecha();
 }
 
 </script>
